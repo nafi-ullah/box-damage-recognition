@@ -1,16 +1,32 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import yaml
 import numpy as np
 import cv2
 from datetime import datetime
 import openpyxl
 import os
-
+from flask_cors import CORS
 app = Flask(__name__)
+
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 app.config['UPLOAD_FOLDER'] = './uploads/'
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
+service_url = "http://localhost:5000"
+UPLOAD_FOLDER = './uploads/'
+OUTPUT_DIR = './output/'
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+@app.route('/uploads/<filename>')
+def get_result_image1(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+@app.route('/output/<filename>')
+def get_result_image2(filename):
+    return send_from_directory(OUTPUT_DIR, filename)
 
 # def upload_video():
 #     if 'video' not in request.files:
@@ -195,15 +211,14 @@ def process_video():
                 time_intervals.append(f"{video_cur_pos:.2f}")
                 object_counts.append(str(total_output))
 
-            k = cv2.waitKey(1)
-            if k == ord('q'):
-                break
-
         except KeyboardInterrupt:
-            data = (current_time, total_output, minutes, ppm_average, ct, ppm)
-            ws.append(data)
-            wb.save(os.path.join(output_dir, "output_" + start_time.strftime("%d-%m-%Y %H-%M-%S") + ".xlsx"))
             break
+
+    # Ensure last second and count are included
+    final_video_pos = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+    if final_video_pos > len(time_intervals) * 3:
+        time_intervals.append(f"{final_video_pos:.2f}")
+        object_counts.append(str(total_output))
 
     cap.release()
     if config['save_video']:
@@ -216,10 +231,20 @@ def process_video():
         "object_count": object_counts
     }
 
+    # Normalize paths to remove './' or any redundant segments
+    normalized_output_video_path = os.path.normpath(fn_out)
+    normalized_original_video_path = os.path.normpath(video_path)
+
+    # Construct the full URLs without './'
+    output_video_url = f"{service_url}/{normalized_output_video_path.lstrip('./')}"
+    original_video_url = f"{service_url}/{normalized_original_video_path.lstrip('./')}"
+
     return jsonify({
-        "output_video_path": fn_out,
+        "output_video_path":  output_video_url,
+        "original_video":  original_video_url,
         "counts": counts
     })
+
 
 
 if __name__ == '__main__':
