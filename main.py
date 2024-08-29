@@ -44,22 +44,22 @@ def process_video():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
-    # data = request.json
-    video_path =  filepath #data.get('video_path', "./testvideo.mp4")  # Default video path if not provided
+    video_path = filepath
 
     # Initialize variables
     start_time = datetime.now()
     last_time = datetime.now()
-
     ct = 0
     total_output = 0
     fastest = 0
     ppm = 0
     ppm_average = 0
-
-    # Record counting every a qty
-    rec_qty = 8
     qty = 0
+    rec_qty = 8
+
+    # Store counts every 3 seconds
+    time_intervals = []
+    object_counts = []
 
     # Prepare for Excel file output
     output_dir = "./output/"
@@ -74,27 +74,26 @@ def process_video():
 
     # Configuration settings
     config = {
-        'save_video': True,  # Set to True to save the video
+        'save_video': True,
         'text_overlay': True,
         'object_overlay': True,
         'object_id_overlay': False,
         'object_detection': True,
-        'min_area_motion_contour': 1000,  # Adjust based on the box size
+        'min_area_motion_contour': 1000,
         'park_sec_to_wait': 0.001,
         'start_frame': 0
     }
 
-    # Load video file instead of capturing from a camera
+    # Load video file
     cap = cv2.VideoCapture(video_path)
 
-    # Define the codec and create VideoWriter object if saving video
     if config['save_video']:
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4 format
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         video_info = {'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
                       'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}
         out = cv2.VideoWriter(fn_out, fourcc, 25.0, (video_info['width'], video_info['height']))
 
-    # Read YAML data for object areas
+    # Load YAML data for object areas
     fn_yaml = "./area.yml"
     with open(fn_yaml, 'r') as stream:
         object_area_data = yaml.safe_load(stream)
@@ -107,7 +106,7 @@ def process_video():
         points = np.array(park['points'])
         rect = cv2.boundingRect(points)
         points_shifted = points.copy()
-        points_shifted[:, 0] = points[:, 0] - rect[0]  # Shift contour to ROI
+        points_shifted[:, 0] = points[:, 0] - rect[0]
         points_shifted[:, 1] = points[:, 1] - rect[1]
         object_contours.append(points)
         object_bounding_rects.append(rect)
@@ -118,15 +117,11 @@ def process_video():
     object_status = [False] * len(object_area_data)
     object_buffer = [None] * len(object_area_data)
 
-    print("Program for counting objects crossing the line. Frame size: 960x720")
-
     while cap.isOpened():
         try:
-            # Read frame-by-frame
-            video_cur_pos = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0  # Current position of the video file in seconds
+            video_cur_pos = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0  # Current position in seconds
             ret, frame = cap.read()
             if not ret:
-                print("Capture Error")
                 break
 
             frame_blur = cv2.GaussianBlur(frame.copy(), (5, 5), 3)
@@ -137,7 +132,7 @@ def process_video():
                 for ind, park in enumerate(object_area_data):
                     points = np.array(park['points'])
                     rect = object_bounding_rects[ind]
-                    roi_gray = frame_gray[rect[1]:(rect[1] + rect[3]), rect[0]:(rect[0] + rect[2])]  # Crop ROI for faster calculation
+                    roi_gray = frame_gray[rect[1]:(rect[1] + rect[3]), rect[0]:(rect[0] + rect[2])]
                     status = np.std(roi_gray) < 20 and np.mean(roi_gray) > 56
 
                     if status != object_status[ind] and object_buffer[ind] is None:
@@ -164,7 +159,6 @@ def process_video():
                                     ws.append(data)
 
                                 if qty > rec_qty:
-                                    # Record to Excel
                                     data = (current_time, total_output, minutes, ppm_average, ct, ppm)
                                     ws.append(data)
                                     qty = 0
@@ -193,9 +187,13 @@ def process_video():
                 str_on_frame = f"Fastest PPM: {fastest}, Average: {ppm_average}"
                 cv2.putText(frame_out, str_on_frame, (5, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1, cv2.LINE_AA)
 
-            # Save the frame to the output video
             if config['save_video']:
                 out.write(frame_out)
+
+            # Record count every 3 seconds
+            if video_cur_pos >= len(time_intervals) * 3:
+                time_intervals.append(f"{video_cur_pos:.2f}")
+                object_counts.append(str(total_output))
 
             k = cv2.waitKey(1)
             if k == ord('q'):
@@ -205,7 +203,6 @@ def process_video():
             data = (current_time, total_output, minutes, ppm_average, ct, ppm)
             ws.append(data)
             wb.save(os.path.join(output_dir, "output_" + start_time.strftime("%d-%m-%Y %H-%M-%S") + ".xlsx"))
-            print("Actual Speed (PPM): " + str(ppm_average))
             break
 
     cap.release()
@@ -213,7 +210,17 @@ def process_video():
         out.release()
     cv2.destroyAllWindows()
 
-    return jsonify({"output_video_path": fn_out})
+    # Create the JSON response with counts
+    counts = {
+        "time": time_intervals,
+        "object_count": object_counts
+    }
+
+    return jsonify({
+        "output_video_path": fn_out,
+        "counts": counts
+    })
+
 
 if __name__ == '__main__':
     app.run(debug=True)
