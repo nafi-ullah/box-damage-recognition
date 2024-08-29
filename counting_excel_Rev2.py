@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import yaml
 import numpy as np
 import cv2
@@ -28,12 +26,12 @@ ws.append(("datetime", "total_output", "minute", "average ppm", "ct", "ppm"))
 
 # File paths
 fn_yaml = "./area.yml"
-fn_out = r"./datasets/output.avi"
+fn_out = r"./output/output.mp4"  # Updated output file path with MP4 extension
 video_path = "./datasets/testvideo.mp4"  # Path to your video file
 
 # Configuration settings
 config = {
-    'save_video': False,
+    'save_video': True,  # Set to True to save the video
     'text_overlay': True,
     'object_overlay': True,
     'object_id_overlay': False,
@@ -48,7 +46,7 @@ cap = cv2.VideoCapture(video_path)
 
 # Define the codec and create VideoWriter object if saving video
 if config['save_video']:
-    fourcc = cv2.VideoWriter_fourcc('D', 'I', 'V', 'X')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4 format
     video_info = {'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
                   'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}
     out = cv2.VideoWriter(fn_out, fourcc, 25.0, (video_info['width'], video_info['height']))
@@ -153,7 +151,12 @@ while cap.isOpened():
 
         # Display video
         imS = cv2.resize(frame_out, (480, 848))
-        cv2.imshow('Output Counting - jobsnavi', imS)
+        cv2.imshow('Output Counting - by Jobsnavi', imS)
+        
+        # Save the frame to the output video
+        if config['save_video']:
+            out.write(frame_out)
+
         k = cv2.waitKey(1)
         if k == ord('q'):
             break
