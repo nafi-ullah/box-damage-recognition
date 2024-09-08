@@ -5,45 +5,37 @@ import cv2
 from datetime import datetime
 import openpyxl
 import os
+import subprocess  # To run ffmpeg commands
 from flask_cors import CORS
+
 app = Flask(__name__)
 
+# Enable CORS for all routes and any origin
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# Configurations
 app.config['UPLOAD_FOLDER'] = './uploads/'
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
 service_url = "http://localhost:5000"
 UPLOAD_FOLDER = './uploads/'
 OUTPUT_DIR = './output/'
+TEMP_DIR = './temp/'  # Temporary directory for intermediate files
 
+# Ensure upload, output, and temp directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
 
+# Route to serve uploaded videos
 @app.route('/uploads/<filename>')
 def get_result_image1(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
+# Route to serve output videos
 @app.route('/output/<filename>')
 def get_result_image2(filename):
     return send_from_directory(OUTPUT_DIR, filename)
-
-# def upload_video():
-#     if 'video' not in request.files:
-#         return jsonify({"error": "No video file provided"}), 400
-    
-#     file = request.files['video']
-#     if file.filename == '':
-#         return jsonify({"error": "No selected file"}), 400
-
-#     if file and file.filename.endswith('.mp4'):
-#         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-#         filename = f"uploaded_{timestamp}.mp4"
-#         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-#         file.save(filepath)
-#         return jsonify({"file_path": filepath}), 200
-
-#     return jsonify({"error": "Unsupported file type"}), 400
 
 @app.route('/process-video', methods=['POST'])
 def process_video():
@@ -78,15 +70,16 @@ def process_video():
     object_counts = []
 
     # Prepare for Excel file output
-    output_dir = "./output/"
-    os.makedirs(output_dir, exist_ok=True)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(("datetime", "total_output", "minute", "average ppm", "ct", "ppm"))
 
-    # Generate output file path with timestamp
+    # Generate output file paths
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    fn_out = os.path.join(output_dir, f"output_{timestamp}.mp4")
+    temp_output_filename = f"output_{timestamp}.avi"  # Intermediate format
+    temp_output_path = os.path.join(TEMP_DIR, temp_output_filename)
+    final_output_filename = f"output_{timestamp}.webm"
+    final_output_path = os.path.join(OUTPUT_DIR, final_output_filename)
 
     # Configuration settings
     config = {
@@ -104,10 +97,10 @@ def process_video():
     cap = cv2.VideoCapture(video_path)
 
     if config['save_video']:
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Use a codec compatible with AVI
         video_info = {'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
                       'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}
-        out = cv2.VideoWriter(fn_out, fourcc, 25.0, (video_info['width'], video_info['height']))
+        out = cv2.VideoWriter(temp_output_path, fourcc, 25.0, (video_info['width'], video_info['height']))
 
     # Load YAML data for object areas
     fn_yaml = "./area.yml"
@@ -225,27 +218,32 @@ def process_video():
         out.release()
     cv2.destroyAllWindows()
 
+    # Convert the intermediate AVI file to WebM using ffmpeg
+    try:
+        subprocess.run([
+            'ffmpeg', '-i', temp_output_path, '-c:v', 'libvpx', '-b:v', '1M', '-c:a', 'libvorbis', final_output_path
+        ], check=True)
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": f"Failed to convert video: {str(e)}"}), 500
+
+    # Clean up the temporary file
+    os.remove(temp_output_path)
+
     # Create the JSON response with counts
     counts = {
         "time": time_intervals,
         "object_count": object_counts
     }
 
-    # Normalize paths to remove './' or any redundant segments
-    normalized_output_video_path = os.path.normpath(fn_out)
-    normalized_original_video_path = os.path.normpath(video_path)
-
     # Construct the full URLs without './'
-    output_video_url = f"{service_url}/{normalized_output_video_path.lstrip('./')}"
-    original_video_url = f"{service_url}/{normalized_original_video_path.lstrip('./')}"
+    output_video_url = f"{service_url}/output/{final_output_filename}"
+    original_video_url = f"{service_url}/uploads/{os.path.basename(video_path)}"
 
     return jsonify({
-        "output_video_path":  output_video_url,
-        "original_video":  original_video_url,
+        "output_video_path": output_video_url,
+        "original_video": original_video_url,
         "counts": counts
     })
-
-
 
 if __name__ == '__main__':
     app.run(debug=True)
