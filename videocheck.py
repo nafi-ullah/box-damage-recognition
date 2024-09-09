@@ -2,9 +2,9 @@ import os
 import cv2
 
 # Read video
-video_path = os.path.join('datasets', 'tomatofast.mp4')  # Run from the root folder
+video_path = os.path.join('datasets', 'longconvey.mp4')  # Run from the root folder
 video = cv2.VideoCapture(video_path)
-
+#longconvey file : 856x480
 width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
 print(f"Video dimensions: {width}x{height}")

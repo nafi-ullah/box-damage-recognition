@@ -1,0 +1,7 @@
+Flask
+Flask-SocketIO
+Flask-Cors
+PyYAML
+opencv-python-headless
+openpyxl
+eventlet
